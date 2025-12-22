@@ -21,7 +21,7 @@ dp = Dispatcher()
 @dp.message(Command(commands=['start']))
 async def start_command(message: Message):
     await message.answer(
-        "Привет! Отправьте мне ссылку на видео с YouTube или ВКонтакте.\n\n"
+        "Привет! Отправьте мне ссылку на видео с YouTube.\n\n"
         "Для получения аудио добавьте слово 'аудио' или 'audio' к ссылке.\n"
         "Для получения видео просто отправьте ссылку.\n\n"
         "Используйте команду /search для поиска видео по названию."
@@ -47,8 +47,12 @@ async def search_command(message: Message, state: FSMContext):
 @dp.message(SearchStates.waiting_for_query)
 async def process_search_query(message: Message, state: FSMContext):
     query = message.text.strip()
-    if not query:
+    print(f"DEBUG (Command Search): Received search query: '{query}' from user {message.from_user.id}")
+
+    # Проверяем, не состоит ли сообщение только из пробельных символов
+    if not query or query.isspace():
         await message.answer("Пожалуйста, введите корректный запрос для поиска.")
+        await state.clear()
         return
 
     await state.clear()
@@ -59,6 +63,7 @@ async def process_search_query(message: Message, state: FSMContext):
     try:
         # Используем yt-dlp для поиска видео
         search_query = f"ytsearch5:{query}"  # ищем 5 первых результатов
+        print(f"DEBUG (Command Search): Searching with query: {search_query}")
 
         ydl_opts = {
             'quiet': True,
@@ -68,6 +73,8 @@ async def process_search_query(message: Message, state: FSMContext):
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
             result = ydl.extract_info(search_query, download=False)
 
+        print(f"DEBUG (Command Search): Search returned {len(result['entries']) if 'entries' in result else 0} results")
+
         if 'entries' in result and result['entries']:
             keyboard = types.InlineKeyboardMarkup(inline_keyboard=[])
 
@@ -75,6 +82,8 @@ async def process_search_query(message: Message, state: FSMContext):
                 title = entry.get('title', 'Без названия')
                 video_id = entry.get('id', '')
                 url = f"https://www.youtube.com/watch?v={video_id}"
+
+                print(f"DEBUG (Command Search): Found video {i+1}: {title[:50]}... (ID: {video_id})")
 
                 # Ограничиваем длину названия для кнопки
                 button_text = title[:50] + "..." if len(title) > 50 else title
@@ -91,36 +100,41 @@ async def process_search_query(message: Message, state: FSMContext):
             # Добавляем кнопку "Отмена"
             keyboard.inline_keyboard.append([
                 types.InlineKeyboardButton(
-                    text="❌ Отмена",
+                    text="Отмена",
                     callback_data="cancel_search"
                 )
             ])
 
             await message.answer("Выберите видео для загрузки:", reply_markup=keyboard)
         else:
+            print(f"DEBUG (Command Search): No results found for query: {query}")
             await message.answer("К сожалению, ничего не найдено по вашему запросу.")
 
     except yt_dlp.DownloadError as e:
+        print(f"DEBUG (Command Search): yt-dlp download error: {str(e)}")
         await message.answer(f"Ошибка при поиске: {str(e)}")
     except Exception as e:
+        print(f"DEBUG (Command Search): General error during search: {str(e)}")
         await message.answer(f"Произошла ошибка при поиске: {str(e)}")
     finally:
         await search_msg.delete()
 
 # Обработчик текстовых сообщений для поиска по названию
-@dp.message(F.text & ~F.text.startswith('/') & ~F.text.contains("youtube.com") & ~F.text.contains("youtu.be") & ~F.text.contains("vk.com"))
+@dp.message(F.text & ~F.text.startswith('/') & ~F.text.contains("youtube.com") & ~F.text.contains("youtu.be"))
 async def search_by_text(message: Message, state: FSMContext):
     # Проверяем, не находится ли пользователь в состоянии ожидания ввода запроса для /search
     current_state = await state.get_state()
     if current_state is not None:
         # Если пользователь уже в каком-то состоянии, не продолжаем обработку
+        print(f"DEBUG: User {message.from_user.id} is in state {current_state}, skipping search")
         return
 
     query = message.text.strip()
+    print(f"DEBUG: Received search query: '{query}' from user {message.from_user.id}")
 
-    # Проверяем, достаточно ли длинный запрос для поиска
-    if len(query) < 2:
-        # Если запрос слишком короткий, не обрабатываем как поиск
+    # Проверяем, не состоит ли сообщение только из пробельных символов
+    if not query or query.isspace():
+        print(f"DEBUG: Query consists only of whitespace characters, skipping search")
         return
 
     # Отправляем сообщение о поиске
@@ -129,6 +143,7 @@ async def search_by_text(message: Message, state: FSMContext):
     try:
         # Используем yt-dlp для поиска видео
         search_query = f"ytsearch5:{query}"  # ищем 5 первых результатов
+        print(f"DEBUG: Searching with query: {search_query}")
 
         ydl_opts = {
             'quiet': True,
@@ -138,6 +153,8 @@ async def search_by_text(message: Message, state: FSMContext):
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
             result = ydl.extract_info(search_query, download=False)
 
+        print(f"DEBUG: Search returned {len(result['entries']) if 'entries' in result else 0} results")
+
         if 'entries' in result and result['entries']:
             keyboard = types.InlineKeyboardMarkup(inline_keyboard=[])
 
@@ -145,6 +162,8 @@ async def search_by_text(message: Message, state: FSMContext):
                 title = entry.get('title', 'Без названия')
                 video_id = entry.get('id', '')
                 url = f"https://www.youtube.com/watch?v={video_id}"
+
+                print(f"DEBUG: Found video {i+1}: {title[:50]}... (ID: {video_id})")
 
                 # Ограничиваем длину названия для кнопки
                 button_text = title[:50] + "..." if len(title) > 50 else title
@@ -168,17 +187,20 @@ async def search_by_text(message: Message, state: FSMContext):
 
             await message.answer("Выберите видео для загрузки:", reply_markup=keyboard)
         else:
+            print(f"DEBUG: No results found for query: {query}")
             await message.answer("К сожалению, ничего не найдено по вашему запросу.")
 
     except yt_dlp.DownloadError as e:
+        print(f"DEBUG: yt-dlp download error: {str(e)}")
         await message.answer(f"Ошибка при поиске: {str(e)}")
     except Exception as e:
+        print(f"DEBUG: General error during search: {str(e)}")
         await message.answer(f"Произошла ошибка при поиске: {str(e)}")
     finally:
         await search_msg.delete()
 
 # Обработчик ссылок
-@dp.message(F.text.contains("youtube.com") | F.text.contains("youtu.be") | F.text.contains("vk.com"))
+@dp.message(F.text.contains("youtube.com") | F.text.contains("youtu.be"))
 async def ask_download_format(message: Message):
     url = message.text.strip()
 
