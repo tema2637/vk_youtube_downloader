@@ -23,8 +23,159 @@ async def start_command(message: Message):
     await message.answer(
         "Привет! Отправьте мне ссылку на видео с YouTube или ВКонтакте.\n\n"
         "Для получения аудио добавьте слово 'аудио' или 'audio' к ссылке.\n"
-        "Для получения видео просто отправьте ссылку."
+        "Для получения видео просто отправьте ссылку.\n\n"
+        "Используйте команду /search для поиска видео по названию."
     )
+
+
+from aiogram.fsm.state import State, StatesGroup
+from aiogram.fsm.context import FSMContext
+
+# Определяем состояния для поиска
+class SearchStates(StatesGroup):
+    waiting_for_query = State()
+
+# Обработчик команды /search
+@dp.message(Command(commands=['search']))
+async def search_command(message: Message, state: FSMContext):
+    await state.set_state(SearchStates.waiting_for_query)
+    await message.answer(
+        "Введите название видео, которое вы хотите найти."
+    )
+
+# Обработчик ввода запроса для поиска
+@dp.message(SearchStates.waiting_for_query)
+async def process_search_query(message: Message, state: FSMContext):
+    query = message.text.strip()
+    if not query:
+        await message.answer("Пожалуйста, введите корректный запрос для поиска.")
+        return
+
+    await state.clear()
+
+    # Отправляем сообщение о поиске
+    search_msg = await message.answer("Поиск видео, пожалуйста подождите...")
+
+    try:
+        # Используем yt-dlp для поиска видео
+        search_query = f"ytsearch5:{query}"  # ищем 5 первых результатов
+
+        ydl_opts = {
+            'quiet': True,
+            'extract_flat': True,  # получаем только информацию без загрузки
+        }
+
+        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+            result = ydl.extract_info(search_query, download=False)
+
+        if 'entries' in result and result['entries']:
+            keyboard = types.InlineKeyboardMarkup(inline_keyboard=[])
+
+            for i, entry in enumerate(result['entries']):
+                title = entry.get('title', 'Без названия')
+                video_id = entry.get('id', '')
+                url = f"https://www.youtube.com/watch?v={video_id}"
+
+                # Ограничиваем длину названия для кнопки
+                button_text = title[:50] + "..." if len(title) > 50 else title
+                callback_data = f"search_video_{url}"
+
+                # Добавляем кнопку в клавиатуру
+                keyboard.inline_keyboard.append([
+                    types.InlineKeyboardButton(
+                        text=f"{i+1}. {button_text}",
+                        callback_data=callback_data
+                    )
+                ])
+
+            # Добавляем кнопку "Отмена"
+            keyboard.inline_keyboard.append([
+                types.InlineKeyboardButton(
+                    text="❌ Отмена",
+                    callback_data="cancel_search"
+                )
+            ])
+
+            await message.answer("Выберите видео для загрузки:", reply_markup=keyboard)
+        else:
+            await message.answer("К сожалению, ничего не найдено по вашему запросу.")
+
+    except yt_dlp.DownloadError as e:
+        await message.answer(f"Ошибка при поиске: {str(e)}")
+    except Exception as e:
+        await message.answer(f"Произошла ошибка при поиске: {str(e)}")
+    finally:
+        await search_msg.delete()
+
+# Обработчик текстовых сообщений для поиска по названию
+@dp.message(F.text & ~F.text.startswith('/') & ~F.text.contains("youtube.com") & ~F.text.contains("youtu.be") & ~F.text.contains("vk.com"))
+async def search_by_text(message: Message, state: FSMContext):
+    # Проверяем, не находится ли пользователь в состоянии ожидания ввода запроса для /search
+    current_state = await state.get_state()
+    if current_state is not None:
+        # Если пользователь уже в каком-то состоянии, не продолжаем обработку
+        return
+
+    query = message.text.strip()
+
+    # Проверяем, достаточно ли длинный запрос для поиска
+    if len(query) < 2:
+        # Если запрос слишком короткий, не обрабатываем как поиск
+        return
+
+    # Отправляем сообщение о поиске
+    search_msg = await message.answer("Поиск видео по названию, пожалуйста подождите...")
+
+    try:
+        # Используем yt-dlp для поиска видео
+        search_query = f"ytsearch5:{query}"  # ищем 5 первых результатов
+
+        ydl_opts = {
+            'quiet': True,
+            'extract_flat': True,  # получаем только информацию без загрузки
+        }
+
+        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+            result = ydl.extract_info(search_query, download=False)
+
+        if 'entries' in result and result['entries']:
+            keyboard = types.InlineKeyboardMarkup(inline_keyboard=[])
+
+            for i, entry in enumerate(result['entries']):
+                title = entry.get('title', 'Без названия')
+                video_id = entry.get('id', '')
+                url = f"https://www.youtube.com/watch?v={video_id}"
+
+                # Ограничиваем длину названия для кнопки
+                button_text = title[:50] + "..." if len(title) > 50 else title
+                callback_data = f"search_video_{url}"
+
+                # Добавляем кнопку в клавиатуру
+                keyboard.inline_keyboard.append([
+                    types.InlineKeyboardButton(
+                        text=f"{i+1}. {button_text}",
+                        callback_data=callback_data
+                    )
+                ])
+
+            # Добавляем кнопку "Отмена"
+            keyboard.inline_keyboard.append([
+                types.InlineKeyboardButton(
+                    text="❌ Отмена",
+                    callback_data="cancel_search"
+                )
+            ])
+
+            await message.answer("Выберите видео для загрузки:", reply_markup=keyboard)
+        else:
+            await message.answer("К сожалению, ничего не найдено по вашему запросу.")
+
+    except yt_dlp.DownloadError as e:
+        await message.answer(f"Ошибка при поиске: {str(e)}")
+    except Exception as e:
+        await message.answer(f"Произошла ошибка при поиске: {str(e)}")
+    finally:
+        await search_msg.delete()
 
 # Обработчик ссылок
 @dp.message(F.text.contains("youtube.com") | F.text.contains("youtu.be") | F.text.contains("vk.com"))
@@ -43,8 +194,30 @@ async def ask_download_format(message: Message):
 
 
 # Обработчик нажатий на инлайн-кнопки
-@dp.callback_query(F.data.startswith('audio_') | F.data.startswith('video_'))
+@dp.callback_query(F.data.startswith('audio_') | F.data.startswith('video_') | F.data.startswith('search_video_') | F.data.startswith('cancel_search'))
 async def download_media_callback(callback_query: CallbackQuery):
+    # Проверяем, является ли callback от кнопки отмены
+    if callback_query.data == 'cancel_search':
+        await callback_query.answer("Поиск отменен.")
+        await callback_query.message.edit_text("Поиск отменен.")
+        return
+
+    # Проверяем, является ли callback от кнопки результата поиска
+    if callback_query.data.startswith('search_video_'):
+        # Извлекаем URL из callback_data
+        url = callback_query.data[13:]  # 'search_video_' составляет 13 символов
+        # По умолчанию предлагаем как аудио, так и видео
+        keyboard = types.InlineKeyboardMarkup(inline_keyboard=[
+            [
+                types.InlineKeyboardButton(text="🎵 Аудио", callback_data=f"audio_{url}"),
+                types.InlineKeyboardButton(text="🎥 Видео", callback_data=f"video_{url}")
+            ]
+        ])
+
+        await callback_query.message.edit_text("Что вы хотите скачать?", reply_markup=keyboard)
+        await callback_query.answer()
+        return
+
     # Отвечаем на callback сразу, чтобы избежать таймаута
     await callback_query.answer()
 
